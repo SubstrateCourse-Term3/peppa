@@ -9,6 +9,7 @@ use system::ensure_signed;
 use rstd::result;
 use crate::linked_item::{LinkedList, LinkedItem};
 
+
 pub trait Trait: system::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 	type KittyIndex: Parameter + Member + SimpleArithmetic + Bounded + Default + Copy;
@@ -19,7 +20,11 @@ pub trait Trait: system::Trait {
 type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
 
 #[derive(Encode, Decode)]
-pub struct Kitty(pub [u8; 16]);
+pub struct Kitty<BlockNumber> {
+	pub dna: [u8; 16], 
+	///小猫的年龄
+	pub create_block_number: BlockNumber 
+}
 
 type KittyLinkedItem<T> = LinkedItem<<T as Trait>::KittyIndex>;
 type OwnedKittiesList<T> = LinkedList<OwnedKitties<T>, <T as system::Trait>::AccountId, <T as Trait>::KittyIndex>;
@@ -27,7 +32,7 @@ type OwnedKittiesList<T> = LinkedList<OwnedKitties<T>, <T as system::Trait>::Acc
 decl_storage! {
 	trait Store for Module<T: Trait> as Kitties {
 		/// Stores all the kitties, key is the kitty id / index
-		pub Kitties get(fn kitties): map T::KittyIndex => Option<Kitty>;
+		pub Kitties get(fn kitties): map T::KittyIndex => Option<Kitty<T::BlockNumber>>;
 		/// Stores the total number of kitties. i.e. the next kitty index
 		pub KittiesCount get(fn kitties_count): T::KittyIndex;
 
@@ -70,8 +75,8 @@ decl_module! {
 			let dna = Self::random_value(&sender);
 
 			// Create and store kitty
-			let kitty = Kitty(dna);
-			Self::insert_kitty(&sender, kitty_id, kitty);
+			
+			Self::insert_kitty(&sender, kitty_id, dna);
 
 			Self::deposit_event(RawEvent::Created(sender, kitty_id));
 		}
@@ -163,13 +168,20 @@ impl<T: Trait> Module<T> {
 		<OwnedKittiesList<T>>::append(owner, kitty_id);
 	}
 
-	fn insert_kitty(owner: &T::AccountId, kitty_id: T::KittyIndex, kitty: Kitty) {
-		// Create and store kitty
+	fn insert_kitty(owner: &T::AccountId, kitty_id: T::KittyIndex, dna: [u8; 16]) {
+		/// 记录小猫被创建时的区块数，以此计算小猫的年龄
+		let block_number = <system::Module<T>>::block_number();
+		let kitty = Kitty{
+			dna: dna,
+			create_block_number: block_number
+		};
+
 		<Kitties<T>>::insert(kitty_id, kitty);
 		<KittiesCount<T>>::put(kitty_id + 1.into());
 		<KittyOwners<T>>::insert(kitty_id, owner.clone());
 
 		Self::insert_owned_kitty(owner, kitty_id);
+
 	}
 
 	fn do_breed(sender: &T::AccountId, kitty_id_1: T::KittyIndex, kitty_id_2: T::KittyIndex) -> result::Result<T::KittyIndex, &'static str> {
@@ -184,8 +196,8 @@ impl<T: Trait> Module<T> {
 
 		let kitty_id = Self::next_kitty_id()?;
 
-		let kitty1_dna = kitty1.unwrap().0;
-		let kitty2_dna = kitty2.unwrap().0;
+		let kitty1_dna = kitty1.unwrap().dna;
+		let kitty2_dna = kitty2.unwrap().dna;
 
 		// Generate a random 128bit value
 		let selector = Self::random_value(&sender);
@@ -196,7 +208,7 @@ impl<T: Trait> Module<T> {
 			new_dna[i] = combine_dna(kitty1_dna[i], kitty2_dna[i], selector[i]);
 		}
 
-		Self::insert_kitty(sender, kitty_id, Kitty(new_dna));
+		Self::insert_kitty(sender, kitty_id, new_dna);
 
 		Ok(kitty_id)
 	}
