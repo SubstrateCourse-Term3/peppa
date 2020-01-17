@@ -1,3 +1,10 @@
+功能：添加年龄功能
+
+1、只有年龄在一定数值内的小猫才能参与繁殖
+
+2、年龄太大的会死亡
+
+
 # Substrate Node Template
 
 A new SRML-based Substrate node, ready for hacking.
