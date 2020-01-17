@@ -19,10 +19,15 @@ pub trait Trait: system::Trait {
 
 type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
 
+const MIN_BREED_AGE:u32 = 2000;//从小猫被创建的区块开始，至少经过2000区块后，才可以生育
+const MAX_BREED_AGE:u32 = 10000;//从小猫被创建的区块开始，至少经过100000区块后，才可以生育
+const MAX_AGE:u32 = 100000;//从小猫被创建的区块开始，超过100000区块后，小猫将死亡
+
+
 #[derive(Encode, Decode)]
 pub struct Kitty<BlockNumber> {
 	pub dna: [u8; 16], 
-	///小猫的年龄
+	///小猫被创建时的区块高度，小猫的年龄 = 当前区块数 - 被创建的区块数
 	pub create_block_number: BlockNumber 
 }
 
@@ -194,10 +199,19 @@ impl<T: Trait> Module<T> {
 		ensure!(Self::kitty_owner(&kitty_id_1).map(|owner| owner == *sender).unwrap_or(false), "Not onwer of kitty1");
  		ensure!(Self::kitty_owner(&kitty_id_2).map(|owner| owner == *sender).unwrap_or(false), "Not owner of kitty2");
 
+		let kitty1 = kitty1.unwrap();
+		let kitty2 = kitty2.unwrap();
+		let block_number = <system::Module<T>>::block_number();
+		let age1 = block_number - kitty1.create_block_number.into();
+		let age2 = block_number - kitty2.create_block_number.into();
+
+		ensure!( age1 >= MIN_BREED_AGE.into() && age1 <= MAX_BREED_AGE.into(), "kitty1's age is not allowed to breed.");
+		ensure!( age2 >= MIN_BREED_AGE.into() && age2 <= MAX_BREED_AGE.into(), "kitty2's age is not allowed to breed.");
+
 		let kitty_id = Self::next_kitty_id()?;
 
-		let kitty1_dna = kitty1.unwrap().dna;
-		let kitty2_dna = kitty2.unwrap().dna;
+		let kitty1_dna = kitty1.dna;
+		let kitty2_dna = kitty2.dna;
 
 		// Generate a random 128bit value
 		let selector = Self::random_value(&sender);
