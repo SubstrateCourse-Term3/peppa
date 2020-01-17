@@ -19,15 +19,15 @@ pub trait Trait: system::Trait {
 
 type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
 
-const MIN_BREED_AGE:u32 = 2000;//从小猫被创建的区块开始，至少经过2000区块后，才可以生育
-const MAX_BREED_AGE:u32 = 10000;//从小猫被创建的区块开始，至少经过100000区块后，才可以生育
-const MAX_AGE:u32 = 100000;//从小猫被创建的区块开始，超过100000区块后，小猫将死亡
+//const MIN_BREED_AGE:u32 = 2000;//从小猫被创建的区块开始，至少经过2000区块后，才可以生育
+//const MAX_BREED_AGE:u32 = 10000;//从小猫被创建的区块开始，至少经过100000区块后，才可以生育
+//const MAX_AGE:u32 = 100000;//从小猫被创建的区块开始，超过100000区块后，小猫将死亡
 
 
 #[derive(Encode, Decode)]
 pub struct Kitty<BlockNumber> {
 	pub dna: [u8; 16], 
-	///小猫被创建时的区块高度，小猫的年龄 = 当前区块数 - 被创建的区块数
+	///小猫被创建时的区块高度，【小猫的年龄】 = 当前区块数 - 被创建的区块数
 	pub create_block_number: BlockNumber 
 }
 
@@ -47,6 +47,14 @@ decl_storage! {
 		pub KittyOwners get(fn kitty_owner): map T::KittyIndex => Option<T::AccountId>;
 		/// Get kitty price. None means not for sale.
 		pub KittyPrices get(fn kitty_price): map T::KittyIndex => Option<BalanceOf<T>>;
+
+		//年龄的定义：
+		pub MinBreedAge: u32;//可以生育的，最小年龄
+		pub MaxBreedAge: u32;//可以生育的，最大年龄
+		pub MaxAge: u32;//最大年龄，超过该年龄，即为死亡
+		pub Owner: T::AccountId;//管理员
+		pub Initial: bool;//是否初始化，只有初始化后，才可以使用所有功能
+
 	}
 }
 
@@ -71,16 +79,26 @@ decl_module! {
 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		fn deposit_event() = default;
 
-		/// Create a new kitty
+		pub fn init(origin, min_breed_age: u32, max_breed_age: u32, max_age: u32) {
+			ensure!(!<Initial>::get(), "Runtime has been already initialized");
+			ensure!(min_breed_age > 0 && min_breed_age <= max_breed_age && max_breed_age < max_age, "Breed limitation ages not valid");
+
+			let sender = ensure_signed(origin)?;
+			<MinBreedAge>::put(min_breed_age);
+			<MaxBreedAge>::put(max_breed_age);
+			<MaxAge>::put(max_age);
+			<Owner<T>>::put(sender);
+			<Initial>::put(true);
+		}
+
 		pub fn create(origin) {
+			ensure!(<Initial>::get(), "Runtime has not been initialized");
 			let sender = ensure_signed(origin)?;
 			let kitty_id = Self::next_kitty_id()?;
 
 			// Generate a random 128bit value
 			let dna = Self::random_value(&sender);
-
 			// Create and store kitty
-			
 			Self::insert_kitty(&sender, kitty_id, dna);
 
 			Self::deposit_event(RawEvent::Created(sender, kitty_id));
@@ -88,8 +106,8 @@ decl_module! {
 
 		/// Breed kitties
 		pub fn breed(origin, kitty_id_1: T::KittyIndex, kitty_id_2: T::KittyIndex) {
+			ensure!(<Initial>::get(), "Runtime has not been initialized");
 			let sender = ensure_signed(origin)?;
-
 			let new_kitty_id = Self::do_breed(&sender, kitty_id_1, kitty_id_2)?;
 
 			Self::deposit_event(RawEvent::Created(sender, new_kitty_id));
@@ -97,6 +115,7 @@ decl_module! {
 
 		/// Transfer a kitty to new owner
  		pub fn transfer(origin, to: T::AccountId, kitty_id: T::KittyIndex) {
+			ensure!(<Initial>::get(), "Runtime has not been initialized");
  			let sender = ensure_signed(origin)?;
 
   			ensure!(<OwnedKitties<T>>::exists(&(sender.clone(), Some(kitty_id))), "Only owner can transfer kitty");
@@ -109,8 +128,8 @@ decl_module! {
 		/// Set a price for a kitty for sale
 		/// None to delist the kitty
 		pub fn ask(origin, kitty_id: T::KittyIndex, price: Option<BalanceOf<T>>) {
+			ensure!(<Initial>::get(), "Runtime has not been initialized");
 			let sender = ensure_signed(origin)?;
-
 			ensure!(<OwnedKitties<T>>::exists(&(sender.clone(), Some(kitty_id))), "Only owner can set price for kitty");
 
 			if let Some(ref price) = price {
@@ -123,6 +142,7 @@ decl_module! {
 		}
 
 		pub fn buy(origin, kitty_id: T::KittyIndex, price: BalanceOf<T>) {
+			ensure!(<Initial>::get(), "Runtime has not been initialized");
 			let sender = ensure_signed(origin)?;
 
 			let owner = Self::kitty_owner(kitty_id);
@@ -142,6 +162,45 @@ decl_module! {
 			Self::do_transfer(&owner, &sender, kitty_id);
 
 			Self::deposit_event(RawEvent::Sold(owner, sender, kitty_id, kitty_price));
+		}
+
+		//更新可生育的最小年龄
+		pub fn update_min_breed_age(origin, min_breed_age: u32) {
+			ensure!(<Initial>::get(), "Runtime has not been initialized");
+			ensure!(min_breed_age > 0 && min_breed_age <= <MaxBreedAge>::get(), "Min breed age is not valid");
+
+			let sender = ensure_signed(origin)?;
+
+			ensure!(sender == <Owner<T>>::get(), "You are not the owner.");
+			<MinBreedAge>::put(min_breed_age);
+		}
+		//更新可生育的最大年龄
+		pub fn update_max_breed_age(origin, max_breed_age: u32) {
+			ensure!(<Initial>::get(), "Runtime has not been initialized");
+			ensure!(<MinBreedAge>::get() <= max_breed_age && max_breed_age < <MaxAge>::get(), "Max bredd age is not valid");
+
+			let sender = ensure_signed(origin)?;
+
+			ensure!(sender == <Owner<T>>::get(), "You are not the owner.");
+			<MaxBreedAge>::put(max_breed_age);
+		}
+		//更新最大年龄
+		pub fn update_max_age(origin, max_age: u32) {
+			ensure!(<Initial>::get(), "Runtime has not been initialized");
+			ensure!(<MaxBreedAge>::get() <= max_age, "Max age is not valid");
+
+			let sender = ensure_signed(origin)?;
+
+			ensure!(sender == <Owner<T>>::get(), "You are not the owner.");
+			<MaxAge>::put(max_age);
+		}
+		//更新admin
+		pub fn update_owner(origin, new_owner: T::AccountId) {
+			ensure!(<Initial>::get(), "Runtime has not been initialized");
+			let sender = ensure_signed(origin)?;
+
+			ensure!(sender == <Owner<T>>::get(), "You are not the owner.");
+			<Owner<T>>::put(new_owner);
 		}
 	}
 }
@@ -205,8 +264,8 @@ impl<T: Trait> Module<T> {
 		let age1 = block_number - kitty1.create_block_number.into();
 		let age2 = block_number - kitty2.create_block_number.into();
 
-		ensure!( age1 >= MIN_BREED_AGE.into() && age1 <= MAX_BREED_AGE.into(), "kitty1's age is not allowed to breed.");
-		ensure!( age2 >= MIN_BREED_AGE.into() && age2 <= MAX_BREED_AGE.into(), "kitty2's age is not allowed to breed.");
+		ensure!( age1 >= <MinBreedAge>::get().into() && age1 <= <MaxBreedAge>::get().into(), "kitty1's age is not allowed to breed.");
+		ensure!( age2 >= <MinBreedAge>::get().into() && age2 <= <MaxBreedAge>::get().into(), "kitty2's age is not allowed to breed.");
 
 		let kitty_id = Self::next_kitty_id()?;
 
