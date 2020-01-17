@@ -48,7 +48,7 @@ decl_storage! {
 		/// Get kitty price. None means not for sale.
 		pub KittyPrices get(fn kitty_price): map T::KittyIndex => Option<BalanceOf<T>>;
 
-		//年龄的定义：
+		//年龄的相关参数定义：
 		pub MinBreedAge: u32;//可以生育的，最小年龄
 		pub MaxBreedAge: u32;//可以生育的，最大年龄
 		pub MaxAge: u32;//最大年龄，超过该年龄，即为死亡
@@ -78,7 +78,7 @@ decl_event!(
 decl_module! {
 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		fn deposit_event() = default;
-
+		//初始化函数，只能执行一次
 		pub fn init(origin, min_breed_age: u32, max_breed_age: u32, max_age: u32) {
 			ensure!(!<Initial>::get(), "Runtime has been already initialized");
 			ensure!(min_breed_age > 0 && min_breed_age <= max_breed_age && max_breed_age < max_age, "Breed limitation ages not valid");
@@ -107,6 +107,9 @@ decl_module! {
 		/// Breed kitties
 		pub fn breed(origin, kitty_id_1: T::KittyIndex, kitty_id_2: T::KittyIndex) {
 			ensure!(<Initial>::get(), "Runtime has not been initialized");
+			ensure!(Self::check_liveness(kitty_id_1), "Kitty1 is dead, cannot breed anymore");
+			ensure!(Self::check_liveness(kitty_id_2), "Kitty2 is dead, cannot breed anymore");
+
 			let sender = ensure_signed(origin)?;
 			let new_kitty_id = Self::do_breed(&sender, kitty_id_1, kitty_id_2)?;
 
@@ -116,6 +119,7 @@ decl_module! {
 		/// Transfer a kitty to new owner
  		pub fn transfer(origin, to: T::AccountId, kitty_id: T::KittyIndex) {
 			ensure!(<Initial>::get(), "Runtime has not been initialized");
+			ensure!(Self::check_liveness(kitty_id), "Kitty is dead, cannot breed anymore");
  			let sender = ensure_signed(origin)?;
 
   			ensure!(<OwnedKitties<T>>::exists(&(sender.clone(), Some(kitty_id))), "Only owner can transfer kitty");
@@ -129,6 +133,8 @@ decl_module! {
 		/// None to delist the kitty
 		pub fn ask(origin, kitty_id: T::KittyIndex, price: Option<BalanceOf<T>>) {
 			ensure!(<Initial>::get(), "Runtime has not been initialized");
+			ensure!(Self::check_liveness(kitty_id), "Kitty is dead, cannot ask for sale");
+
 			let sender = ensure_signed(origin)?;
 			ensure!(<OwnedKitties<T>>::exists(&(sender.clone(), Some(kitty_id))), "Only owner can set price for kitty");
 
@@ -143,6 +149,12 @@ decl_module! {
 
 		pub fn buy(origin, kitty_id: T::KittyIndex, price: BalanceOf<T>) {
 			ensure!(<Initial>::get(), "Runtime has not been initialized");
+			let isLive = Self::check_liveness(kitty_id);
+			if !isLive {//如果小猫死亡，需要从挂单中删除
+				<KittyPrices<T>>::remove(kitty_id);
+			}
+			ensure!(isLive, "Kitty is dead, cannot sale anymore");
+
 			let sender = ensure_signed(origin)?;
 
 			let owner = Self::kitty_owner(kitty_id);
@@ -261,6 +273,7 @@ impl<T: Trait> Module<T> {
 		let kitty1 = kitty1.unwrap();
 		let kitty2 = kitty2.unwrap();
 		let block_number = <system::Module<T>>::block_number();
+
 		let age1 = block_number - kitty1.create_block_number.into();
 		let age2 = block_number - kitty2.create_block_number.into();
 
@@ -291,6 +304,14 @@ impl<T: Trait> Module<T> {
  		<OwnedKittiesList<T>>::append(&to, kitty_id);
  		<KittyOwners<T>>::insert(kitty_id, to);
  	}
+	fn check_liveness(kitty_id: T::KittyIndex) -> bool{
+		let block_number = <system::Module<T>>::block_number();
+		let kitty = Self::kitties(kitty_id).unwrap();
+		if block_number - kitty.create_block_number < <MaxAge>::get().into() {
+			return true;
+		}
+		return false;
+	}
 }
 
 /// Tests for Kitties module
